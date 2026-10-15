@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block title %}Error {{ code }}{% endblock %}{% block content %}<div class="error-state card"><span class="error-code">{{ code }}</span><h1>We couldn't complete that request</h1><p class="muted">{{ message }}</p><a class="btn btn-primary" href="{{ url_for('dashboard') }}"><i class="fa-solid fa-house"></i> Return to dashboard</a></div>{% endblock %}
