@@ -7,3 +7,4 @@ instance/*.sqlite3
 *.db
 *.sqlite
 *.sqlite3
+instance/

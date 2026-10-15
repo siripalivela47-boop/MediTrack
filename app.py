@@ -1,4 +1,5 @@
 import os, csv, io, sqlite3, math
+from sklearn.tree import DecisionTreeClassifier
 from datetime import date, datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g, make_response, abort
@@ -294,22 +295,75 @@ def expiry():
     return render_template("expiry.html", medicines=meds, days=period)
 
 def prediction_rows():
-    db=connect_db()
-    meds=db.execute("SELECT * FROM medicines ORDER BY name").fetchall()
-    rows=[]
+    # Example training data: estimated days until stockout
+    X_train = [[1], [3], [7], [8], [14],
+               [21], [30], [31], [45], [60]]
+
+    y_train = [
+        "High", "High", "High",
+        "Medium", "Medium", "Medium", "Medium",
+        "Monitor", "Monitor", "Monitor"
+    ]
+
+    model = DecisionTreeClassifier(random_state=42)
+    model.fit(X_train, y_train)
+
+    db = connect_db()
+    meds = db.execute(
+        "SELECT * FROM medicines ORDER BY name"
+    ).fetchall()
+
+    rows = []
+
     for m in meds:
-        history=db.execute("""SELECT SUM(quantity) total, MIN(created_at) first_seen, MAX(created_at) last_seen
-            FROM stock_movements WHERE medicine_id=? AND movement_type='ISSUE'""",(m["id"],)).fetchone()
-        total=history["total"] or 0
-        if total and history["first_seen"] and history["last_seen"] and history["first_seen"][:10]!=history["last_seen"][:10]:
-            span=max(1,(date.fromisoformat(history["last_seen"][:10])-date.fromisoformat(history["first_seen"][:10])).days+1)
-            avg=total/span; method="Recorded issues"
+        history = db.execute("""
+            SELECT SUM(quantity) total,
+                   MIN(created_at) first_seen,
+                   MAX(created_at) last_seen
+            FROM stock_movements
+            WHERE medicine_id=? AND movement_type='ISSUE'
+        """, (m["id"],)).fetchone()
+
+        total = history["total"] or 0
+
+        if (
+            total
+            and history["first_seen"]
+            and history["last_seen"]
+            and history["first_seen"][:10] != history["last_seen"][:10]
+        ):
+            span = max(
+                1,
+                (
+                    date.fromisoformat(history["last_seen"][:10])
+                    - date.fromisoformat(history["first_seen"][:10])
+                ).days + 1
+            )
+            avg = total / span
+            method = "Decision Tree + Recorded issues"
         else:
-            avg=0.0; method="Insufficient issue history"
-        days_left=(m["quantity"]/avg) if avg>0 else None
-        rows.append({"medicine":m,"avg":avg,"days":days_left,"requirement":math.ceil(avg*30) if avg>0 else None,
-                     "method":method,"risk":"High" if days_left is not None and days_left<=7 else ("Medium" if days_left is not None and days_left<=30 else "Monitor")})
-    db.close(); return rows
+            avg = 0.0
+            method = "Insufficient issue history"
+
+        days_left = m["quantity"] / avg if avg > 0 else None
+
+        if days_left is not None:
+            risk = model.predict([[days_left]])[0]
+        else:
+            risk = "Insufficient history"
+
+        rows.append({
+            "medicine": m,
+            "avg": avg,
+            "days": days_left,
+            "requirement": math.ceil(avg * 30) if avg > 0 else None,
+            "method": method,
+            "risk": risk
+        })
+
+    db.close()
+    return rows
+
 
 @app.route("/predictions")
 @login_required
